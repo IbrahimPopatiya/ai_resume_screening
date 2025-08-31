@@ -1,0 +1,35 @@
+I'm Mohammed Ibrahim Popatiya, a final-year student from India focused on backend development and applied AI/ML. I build practical tools that combine FastAPI backends with LLMs, semantic search, and embeddings. Across my projects I containerize services with Docker and persist data in PostgreSQL and, when needed, Qdrant for vector search. My experience spans document/file Q&A, format conversion pipelines, video processing, and retrieval-augmented systems.
+
+Core skills: Python, FastAPI, SQL/PostgreSQL, Docker, embeddings/semantic search, LangChain, OpenAI/Gemini LLMs, PyTorch, scikit-learn, Qdrant, Computer Vision. I enjoy designing clear APIs, reliable data flows, and lightweight retrieval pipelines that make AI features fast and useful. I’m seeking roles where I can build backend services and productionize AI features end-to-end.
+
+Projects
+- File_Manager — AI file finder and history tracker
+  - Built a FastAPI service that indexes filenames/paths/content with embeddings, stores metadata (timestamps, edit events) in Postgres, and provides semantic search to locate “the file I just worked on”.
+  - Dockerized stack; natural-language queries over recent edits; basic timeline view.
+  - Tech: FastAPI, OpenAI embeddings, Postgres, Docker, LangChain, optional Qdrant.
+  - Results: indexed ~3,000 files; typical query < 1.5s; outperforms keyword search on recency and fuzzy matches.
+
+- File_Extractor — Ask questions about any file
+  - Supports PDFs/DOCX/TXT/CSV; chunks and embeds content; retrieves semantically relevant passages and composes answers with the LLM.
+  - FastAPI API with Postgres for metadata and optional Qdrant for vectors; follow-up questions reuse conversation context.
+  - Tech: FastAPI, LangChain, OpenAI, Postgres/Qdrant, Docker.
+  - Results: end-to-end latency ~2–4s on typical docs; high answer relevance in informal tests on course notes and resumes.
+
+- File_Converter & Changeover — universal conversion and transcription
+  - Converts between common formats (PDF<->DOCX, PPTX->PDF, image OCR->text) and extracts audio/text from video; optional LLM summarization.
+  - Batch/async processing pipeline; artifacts tracked in Postgres; containerized workers.
+  - Tech: FastAPI, ffmpeg/moviepy, Whisper/OpenAI, optional pytesseract, Postgres, Docker.
+  - Results: processed dozens of files per run; average conversion time 2–10s depending on size; accurate transcripts on clear audio.
+
+- Video_Downloader — download, audio-only, transcript, summarization
+  - Downloads YouTube videos (or audio-only), extracts transcripts, and generates concise summaries.
+  - Tech: yt-dlp, ffmpeg, Whisper/OpenAI, FastAPI, Docker, Postgres.
+  - Results: reliable downloads on public videos; summary generation in ~5–8s for typical content; simple API for automation.
+
+Notes across AI projects
+- Common patterns: semantic search, embeddings, Dockerized deployment, PostgreSQL for persistence; Qdrant used when vector search is central.
+- Focus areas: clean FastAPI design, pragmatic retrieval pipelines, and making AI features usable from simple endpoints.
+
+Targets
+- Roles: Backend Intern, ML Engineer Intern, GenAI Engineer.
+- I want to work on teams shipping real products, where I can own small backend services and add AI features end-to-end.

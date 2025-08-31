@@ -1,0 +1,9 @@
+openai
+gradio
+pypdf
+python-dotenv
+crewai
+crewai-tools
+sendgrid
+python-docx
+google-generativeai
