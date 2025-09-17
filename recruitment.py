@@ -13,22 +13,19 @@ import os
 from sendgrid.helpers.mail import Mail,Email,To,Content
 import google.generativeai as genai
 import asyncio
-
-
-
+from datetime import datetime
+import shutil
+## how are you
 load_dotenv(override=True)
 
-function_tool
-def file_of_candidate(file_path: str) -> str:
-    """
-    Extract candidate data from resumes in PDF, DOCX, or TXT format.
 
-    Args:
-        file_path (str): Path to the resume file.
+UPLOAD_FOLDER = 'data'
+os.makedirs(UPLOAD_FOLDER,exist_ok=True)
 
-    Returns:
-        str: Extracted candidate text data.
-    """
+
+CURRENT_RESUME_TEXT = None
+
+def extract_candidate_data(file_path: str) -> str:
     ext = os.path.splitext(file_path)[1].lower()
     candidate_data = ""
 
@@ -55,6 +52,49 @@ def file_of_candidate(file_path: str) -> str:
         raise ValueError(f"Unsupported file format: {ext}")
 
     return candidate_data.strip()
+
+
+
+
+def handle_resume_upload(file):
+    """
+    Save uploaded file, extract text, and store globally for later queries.
+    """
+    global CURRENT_RESUME_TEXT
+    if file is None:
+        return "Please upload a resume first."
+    
+    safe_name = os.path.basename(file.name)
+    filename = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{safe_name}"
+    save_path = os.path.join(UPLOAD_FOLDER, filename)
+    shutil.copy(file.name, save_path)
+    # with open(save_path, "wb") as f:
+    #     f.write(file.read())
+    result = extract_candidate_data(save_path)
+    print("DEBUG type:", type(result))
+    print("DEBUG repr:", repr(result))
+    candidate_text = result
+
+    CURRENT_RESUME_TEXT = candidate_text
+
+    return f"✅ Resume uploaded and processed: {file.name}"
+
+
+
+
+
+@function_tool
+def file_of_candidate(file_path: str) -> str:
+    """
+    Extract candidate data from resumes in PDF, DOCX, or TXT format.
+
+    Args:
+        file_path (str): Path to the resume file.
+
+    Returns:
+        str: Extracted candidate text data.
+    """
+    return extract_candidate_data(file_path)
 
 
 personal_info_instructions = """
@@ -418,39 +458,49 @@ tools = [file_of_candidate,tool1,tool2,tool3,tool4,tool5,tool6,tool7,extract_can
 
 
 instructions = """
-You are a Resume Master Agent. Your goal is to extract the most accurate and complete candidate information using the resume_agent tools.
+You are the Resume Master Agent. Your role is to coordinate the specialized resume_agent tools and deliver recruiter-friendly answers.
 
-Follow these steps carefully:
- Use the `file_of_candidate` tool FIRST to extract text content from the given file. 
-   - Input: the file path
-   - Output: candidate_data (resume text)
+How you must work:
 
-1. Extraction: Use the resume_agent tools to extract candidate information from the provided candidate_data. Ensure the following categories are always covered:
-   - Personal Information (name, contact, email, address if available)
-   - Skills (technical and soft)
-   - Programming Languages
-   - Experience (job title, company, duration, responsibilities)
-   - Education (degree, university, year)
-   - Projects (title, description, technologies used)
-   - Achievements (awards, certifications, notable accomplishments)
+1. **Text Extraction**  
+   - Use the `file_of_candidate` tool to extract the raw resume text if not already available.
 
-2. Validation & Refinement: If extracted data is incomplete, unclear, or inconsistent, re-run the extraction tool or cross-check with alternate parsing tools until the output is precise and well-structured.
+2. **Tool Delegation**  
+   - Do not extract information yourself.  
+   - Always call the correct specialized agent/tool depending on the recruiter’s question:
+     • Personal info → personal_info_agent  
+     • Skills → skills_agent  
+     • Programming languages → programming_languages_agent  
+     • Experience → experience_agent  
+     • Education → education_agent  
+     • Projects → projects_agent  
+     • Achievements → achievements_agent  
+   - If recruiter asks for **all details** or explicitly for **JSON**, call all relevant agents and combine results.
 
-3. Output Formatting: Return the final extracted data in clean, structured JSON format with clear keys for each category. Example:
-{
-  "personal_info": {...},
-  "skills": [...],
-  "programming_languages": [...],
-  "experience": [...],
-  "education": [...],
-  "projects": [...],
-  "achievements": [...]
-}
+3. **Answer Style**  
+   - **Default behavior:** Give a clear, concise, recruiter-friendly answer in plain text.  
+     Example:  
+     Recruiter: *“What are the skills of Ibrahim?”*  
+     Response: *“Ibrahim’s skills include Python, FastAPI, PyQt5, AI-powered applications, and Automation tools. Soft skills include problem-solving, creativity, and user-focused design.”*  
+   - **Only if explicitly asked for ‘all information’ or ‘JSON’**, return the complete structured JSON object:
+     {
+       "personal_info": {...},
+       "skills": {...},
+       "programming_languages": [...],
+       "experience": [...],
+       "education": [...],
+       "projects": [...],
+       "achievements": [...]
+     }
 
-Crucial Rules:
-- Always use the resume_agent tools for extraction, never write content manually.
-- Ensure no category is left blank. If information is missing, return an empty array or null value instead of skipping.
-- Final output must be in a single JSON object, well-formatted and complete.
+4. **Validation & Completeness**  
+   - If one tool’s output is incomplete or unclear, re-query or combine results from other tools.  
+   - Never fabricate data. If something is missing, state it’s unavailable or leave it null in JSON.
+
+**Critical Rules:**  
+- Default = recruiter-friendly plain text answers.  
+- JSON = only when recruiter explicitly requests all info or JSON.  
+- Always rely on the resume_agent tools’ outputs and respect their formatting.  
 """
 
 resume_master_agent = Agent(
@@ -460,43 +510,52 @@ resume_master_agent = Agent(
     model="gpt-4o-mini"
 )
 
-message = "I want the projects that is build by candidate. there is file of the candidate 'ibrahim.txt' "
 
-# with trace("Resume master agent"):
-    # result = await Runner.run(resume_master_agent,message)
+async def resume_chat(message,history):
+    global CURRENT_RESUME_TEXT
+    if not CURRENT_RESUME_TEXT:
+        return "⚠️ Please upload a resume first (use the upload button above)."
 
+    
+    merged_input = (
+        f"Here is the candidate resume:\n{CURRENT_RESUME_TEXT}\n\n"
+        f"Recruiter question: {message}"
+    )
 
+    print("DEBUG merged input:", repr(merged_input))
 
-class ResumeChat:
-    def __init__(self, agent):
-        self.agent = agent
-        self.history = []
-
-    async def chat(self, message, history):
-        # Keep track of conversation
-        messages = [{"role": "system", "content": self.agent.instructions}]
-        for user_msg,assistant_msg in history:
-            messages.append({"role": "user", "content": user_msg})
-            messages.append({"role": "assistant", "content": assistant_msg})
-
-        messages.append({"role": "user", "content": message})
-
-        # Run the agent with the given message
-        async with trace("Resume master agent chat"):
-            result = await Runner.run(self.agent, message)
-
-        return str(result)  # convert JSON/dict to string for 
+    result = await Runner.run(resume_master_agent, merged_input)
+    return result.final_output
     
 
-# Create chat interface
-resume_chat = ResumeChat(resume_master_agent)
 
-demo = gr.ChatInterface(
-    fn=resume_chat.chat,
-    type="messages",
-    title="Resume Screening Assistant",
-    description="Upload a resume and ask questions about candidate info."
-)
+
+
+with gr.Blocks() as demo:
+    gr.Markdown("## 📂 Resume Screening Assistant")
+
+    with gr.Row():
+        resume_file = gr.File(label="Upload Resume", file_types=[".pdf", ".docx", ".txt"])
+        upload_btn = gr.Button("Upload")
+
+    upload_status = gr.Textbox(label="Upload Status")
+
+    chat = gr.ChatInterface(
+        fn=resume_chat,
+        type="messages",
+        title="Chat about Candidate",
+        description="Upload a resume, then ask questions about it."
+    )
+
+    upload_btn.click(
+        fn=handle_resume_upload,
+        inputs=resume_file,
+        outputs=upload_status
+    )
 
 if __name__ == "__main__":
     demo.launch()
+
+
+
+
