@@ -15,15 +15,21 @@ import google.generativeai as genai
 import asyncio
 from datetime import datetime
 import shutil
+import uuid
+from databse import PostgresDB
+
 ## how are you
 load_dotenv(override=True)
 
+db = PostgresDB()
+db.create_table()
 
 UPLOAD_FOLDER = 'data'
 os.makedirs(UPLOAD_FOLDER,exist_ok=True)
 
 
 CURRENT_RESUME_TEXT = None
+CURRENT_DOC_ID = None
 
 def extract_candidate_data(file_path: str) -> str:
     ext = os.path.splitext(file_path)[1].lower()
@@ -60,7 +66,7 @@ def handle_resume_upload(file):
     """
     Save uploaded file, extract text, and store globally for later queries.
     """
-    global CURRENT_RESUME_TEXT
+    global CURRENT_RESUME_TEXT,CURRENT_DOC_ID
     if file is None:
         return "Please upload a resume first."
     
@@ -75,9 +81,14 @@ def handle_resume_upload(file):
     print("DEBUG repr:", repr(result))
     candidate_text = result
 
-    CURRENT_RESUME_TEXT = candidate_text
+    doc_id = str(uuid.uuid4())
+    db.insert_metadata(doc_id, filename, save_path)
 
-    return f"✅ Resume uploaded and processed: {file.name}"
+
+    CURRENT_RESUME_TEXT = candidate_text
+    CURRENT_DOC_ID = doc_id
+
+    return f"✅ Resume uploaded and processed doc_id =  {doc_id}"
 
 
 
@@ -512,9 +523,21 @@ resume_master_agent = Agent(
 
 
 async def resume_chat(message,history):
-    global CURRENT_RESUME_TEXT
+    global CURRENT_RESUME_TEXT,CURRENT_DOC_ID
     if not CURRENT_RESUME_TEXT:
-        return "⚠️ Please upload a resume first (use the upload button above)."
+        if message.lower().startswith("doc_id:"):
+            doc_id = message.split("doc_id:")[1].strip()
+            file_path = db.get_file_path(doc_id)
+            if not file_path:
+                return "⚠️ Document not found in DB. Please upload again or provide a valid doc_id."
+
+            CURRENT_RESUME_TEXT = extract_candidate_data(file_path)
+            CURRENT_DOC_ID = doc_id
+            return f"✅ Loaded resume from DB (doc_id={doc_id}). Now you can ask questions."
+        else:
+            return "⚠️ No resume uploaded. Upload a file or type `doc_id:<your_id>` to load one."
+    
+
 
     
     merged_input = (
@@ -528,6 +551,17 @@ async def resume_chat(message,history):
     return result.final_output
     
 
+def handle_doc_id_input(doc_id):
+    global CURRENT_RESUME_TEXT, CURRENT_DOC_ID
+    file_path = db.get_file_path(doc_id)
+
+    if not file_path:
+        return f"⚠️ No document found for doc_id={doc_id}"
+
+    CURRENT_RESUME_TEXT = extract_candidate_data(file_path)
+    CURRENT_DOC_ID = doc_id
+
+    return f"✅ Loaded resume from DB (doc_id={doc_id})"
 
 
 
@@ -540,16 +574,26 @@ with gr.Blocks() as demo:
 
     upload_status = gr.Textbox(label="Upload Status")
 
+    with gr.Row():
+        doc_id_input = gr.Textbox(label="Enter Existing Doc ID")
+        doc_id_btn = gr.Button("Load Document")
+
     chat = gr.ChatInterface(
         fn=resume_chat,
         type="messages",
         title="Chat about Candidate",
-        description="Upload a resume, then ask questions about it."
+        description="Upload a resume or enter an existing doc_id to start asking questions."
     )
 
     upload_btn.click(
         fn=handle_resume_upload,
         inputs=resume_file,
+        outputs=upload_status
+    )
+
+    doc_id_btn.click(
+        fn=handle_doc_id_input,
+        inputs=doc_id_input,
         outputs=upload_status
     )
 
