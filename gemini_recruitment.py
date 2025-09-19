@@ -1,0 +1,619 @@
+  
+from dotenv import load_dotenv
+from openai import OpenAI
+from pypdf import PdfReader
+import gradio as gr
+from dotenv import load_dotenv
+from agents import Agent,Runner,trace,function_tool,OpenAIChatCompletionsModel
+from openai.types.responses import ResponseTextDeltaEvent
+from typing import Dict
+import sendgrid
+from docx import Document
+from openai import AsyncOpenAI
+import os
+from sendgrid.helpers.mail import Mail,Email,To,Content
+import google.generativeai as genai
+import asyncio
+from datetime import datetime
+import shutil
+import uuid
+from databse import PostgresDB
+
+## how are you
+load_dotenv(override=True)
+
+db = PostgresDB()
+db.create_table()
+
+UPLOAD_FOLDER = 'data'
+os.makedirs(UPLOAD_FOLDER,exist_ok=True)
+
+CURRENT_RESUME_TEXT = None
+CURRENT_DOC_ID = None
+
+
+google_api_key = os.getenv('GOOGLE_API_KEY')
+
+if google_api_key:
+    print(f"Google API Key exists and begins {google_api_key[:2]}")
+else:
+    print("Google API Key not set (and this is optional)")
+
+GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+
+gemini_client = AsyncOpenAI(base_url=GEMINI_BASE_URL, api_key=google_api_key)
+gemini_model = OpenAIChatCompletionsModel(model="gemini-2.0-flash", openai_client=gemini_client)
+
+
+def extract_candidate_data(file_path: str) -> str:
+    ext = os.path.splitext(file_path)[1].lower()
+    candidate_data = ""
+
+    # Handle PDF
+    if ext == ".pdf":
+        reader = PdfReader(file_path)
+        for page in reader.pages:
+            text = page.extract_text()
+            if text:
+                candidate_data += text + "\n"
+
+    # Handle TXT
+    elif ext == ".txt":
+        with open(file_path, "r", encoding="utf-8") as f:
+            candidate_data = f.read()
+
+    # Handle DOCX
+    elif ext == ".docx":
+        doc = Document(file_path)
+        for para in doc.paragraphs:
+            candidate_data += para.text + "\n"
+
+    else:
+        raise ValueError(f"Unsupported file format: {ext}")
+
+    return candidate_data.strip()
+
+
+
+
+def handle_resume_upload(file):
+    """
+    Save uploaded file, extract text, and store globally for later queries.
+    """
+    global CURRENT_RESUME_TEXT,CURRENT_DOC_ID
+    if file is None:
+        return "Please upload a resume first."
+    
+    safe_name = os.path.basename(file.name)
+    filename = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{safe_name}"
+    save_path = os.path.join(UPLOAD_FOLDER, filename)
+    shutil.copy(file.name, save_path)
+    # with open(save_path, "wb") as f:
+    #     f.write(file.read())
+    result = extract_candidate_data(save_path)
+    print("DEBUG type:", type(result))
+    print("DEBUG repr:", repr(result))
+    candidate_text = result
+
+    doc_id = str(uuid.uuid4())
+    db.insert_metadata(doc_id, filename, save_path)
+
+
+    CURRENT_RESUME_TEXT = candidate_text
+    CURRENT_DOC_ID = doc_id
+
+    return f"✅ Resume uploaded and processed doc_id =  {doc_id}"
+
+
+
+
+
+@function_tool
+def file_of_candidate(file_path: str) -> str:
+    """
+    Extract candidate data from resumes in PDF, DOCX, or TXT format.
+
+    Args:
+        file_path (str): Path to the resume file.
+
+    Returns:
+        str: Extracted candidate text data.
+    """
+    return extract_candidate_data(file_path)
+
+
+personal_info_instructions = """
+You are a Personal Info Extraction Agent working for the Recruitment Screening System.
+Your task is to carefully analyze a candidate’s resume and extract structured personal information.
+
+You must:
+- Identify and return the candidate’s full name.
+- Extract valid email addresses (if any).
+- Extract phone numbers (international/national formats).
+- Extract LinkedIn, GitHub, or personal website URLs (if mentioned).
+
+Your response must always be in clean, structured JSON format:
+{
+  "name": "Candidate Name",
+  "email": "example@email.com",
+  "phone": "+1-202-555-0147",
+  "linkedin": "https://linkedin.com/in/example",
+  "github": "https://github.com/example",
+  "website": "https://example.com"
+}
+
+If any field is missing in the resume, return it as null.
+"""
+
+personal_info_agent = Agent(
+    name = "Personal Info of candidate",
+    instructions=personal_info_instructions,
+    model=gemini_model
+)
+
+
+skills_instructions = """
+You are a Skills Extraction Agent working for the Recruitment Screening System.
+Your task is to carefully analyze a candidate’s resume and extract all relevant skills.
+
+You must:
+- Identify technical skills (e.g., Python, SQL, Docker, AWS).
+- Identify non-technical/soft skills (e.g., communication, leadership, teamwork).
+- Group related skills together where possible.
+- Avoid duplicates and keep skills concise.
+
+Your response must always be in structured JSON format:
+{
+  "technical_skills": ["Python", "SQL", "Docker", "AWS"],
+  "soft_skills": ["Communication", "Leadership", "Teamwork"]
+}
+
+If a category is not present, return it as an empty list.
+"""
+
+
+
+skills_agent = Agent(
+    name = "skills of candidate",
+    instructions=skills_instructions,
+    model=gemini_model
+)
+
+
+languages_instructions = """
+You are a Programming Language Extraction Agent for the Recruitment Screening System.
+Your task is to scan a candidate’s resume and identify all programming languages mentioned.
+
+You must:
+- Only extract actual programming languages (e.g., Python, Java, C++, JavaScript, Go, Rust).
+- Do not include frameworks, tools, or libraries (e.g., React, Django, TensorFlow).
+- Deduplicate entries (if 'Python' appears multiple times, list it once).
+- Keep names standardized (e.g., 'C++', 'JavaScript' instead of 'JS').
+
+Your response must always be in structured JSON format:
+{
+  "programming_languages": ["Python", "Java", "C++", "JavaScript"]
+}
+
+If no programming languages are found, return an empty list.
+"""
+
+
+programming_language_agent = Agent(
+    name = "Programming language learn by candidate",
+    instructions=languages_instructions,
+    model=gemini_model
+)
+
+
+experience_instructions = """
+You are an Experience Extraction Agent for the Recruitment Screening System.
+Your task is to scan a candidate’s resume and extract their professional experience.
+
+You must:
+- Identify each work experience entry (internship, job, freelance, etc.).
+- For each entry, extract:
+  - Job Title / Role
+  - Company / Organization
+  - Duration (start and end dates, or "Present" if ongoing)
+  - Key Responsibilities or Achievements (short summary)
+
+Format the output as structured JSON:
+{
+  "experience": [
+    {
+      "role": "Software Engineer",
+      "company": "ABC Tech",
+      "duration": "Jan 2021 – Mar 2023",
+      "description": "Developed REST APIs, optimized database queries, led a team of 3 engineers."
+    },
+    {
+      "role": "Intern",
+      "company": "XYZ Corp",
+      "duration": "Jun 2020 – Dec 2020",
+      "description": "Built automation scripts and assisted in QA testing."
+    }
+  ]
+}
+
+If no experience is found, return an empty list.
+"""
+
+
+experience_agent = Agent(
+    name = "Experience's of candidate",
+    instructions=experience_instructions,
+    model=gemini_model
+)
+
+
+
+education_instructions = """
+You are an Education Extraction Agent for the Recruitment Screening System.
+Your task is to scan a candidate’s resume and extract their academic background.
+
+You must:
+- Identify each education entry.
+- For each entry, extract:
+  - Degree / Qualification (e.g., B.Tech in Computer Science, MBA, Diploma, etc.)
+  - University / Institute Name
+  - Duration (start and end years, or "Present" if ongoing)
+  - Additional Info (e.g., GPA, honors, specialization) if available.
+
+Format the output as structured JSON:
+{
+  "education": [
+    {
+      "degree": "B.Tech in Computer Science",
+      "university": "Indian Institute of Technology, Bombay",
+      "duration": "2018 – 2022",
+      "additional_info": "CGPA: 8.7/10, Minor in Data Science"
+    },
+    {
+      "degree": "High School (Science Stream)",
+      "university": "Delhi Public School",
+      "duration": "2016 – 2018",
+      "additional_info": "CBSE Board, 92%"
+    }
+  ]
+}
+
+If no education details are found, return an empty list.
+"""
+
+
+education_agent = Agent(
+    name = "education of candidate",
+    instructions=education_instructions,
+    model=gemini_model
+)
+
+
+projects_instructions = """
+You are a Projects Extraction Agent for the Recruitment Screening System.
+Your task is to scan a candidate’s resume and extract details about the projects they have built or contributed to.
+
+You must:
+- Identify each project mentioned in the resume.
+- For each project, extract:
+  - Project Title / Name
+  - Short Description (2–3 sentences max, summarizing what it is)
+  - Technologies / Tools used
+  - Role or Contribution of the candidate
+  - Duration (if mentioned)
+
+Format the output as structured JSON:
+{
+  "projects": [
+    {
+      "title": "AI-Powered Chatbot",
+      "description": "Developed a chatbot using NLP to automate customer support and reduce response time.",
+      "technologies": ["Python", "TensorFlow", "Flask"],
+      "role": "Designed model pipeline and deployed backend API",
+      "duration": "Jan 2022 – May 2022"
+    },
+    {
+      "title": "E-commerce Website",
+      "description": "Built a full-stack e-commerce platform with product catalog, shopping cart, and payment gateway integration.",
+      "technologies": ["React", "Node.js", "MongoDB"],
+      "role": "Implemented checkout system and optimized database queries",
+      "duration": "2021"
+    }
+  ]
+}
+
+If no projects are found, return an empty list.
+"""
+
+projects_agent = Agent(
+    name = "Project build by candidate",
+    instructions=projects_instructions,
+    model=gemini_model
+)
+
+achievements_instructions = """
+You are an Achievements Extraction Agent for the Recruitment Screening System.
+Your task is to scan a candidate’s resume and extract any awards, honors, recognitions, or notable achievements.
+
+You must:
+- Identify each achievement mentioned.
+- For each achievement, extract:
+  - Title / Name of Achievement
+  - Organization / Institution that granted it (if available)
+  - Year or Date (if available)
+  - Short Description (1–2 lines about why it was awarded)
+
+Format the output as structured JSON:
+{
+  "achievements": [
+    {
+      "title": "Winner - National Coding Hackathon",
+      "organization": "TechFest India",
+      "year": "2022",
+      "description": "Secured 1st place among 500 teams by building an AI-based fraud detection system."
+    },
+    {
+      "title": "Employee of the Month",
+      "organization": "ABC Corp",
+      "year": "2021",
+      "description": "Recognized for leading a high-impact automation project that reduced processing time by 40%."
+    }
+  ]
+}
+
+If no achievements are found, return an empty list.
+"""
+
+
+achievements_agent = Agent(
+    name = "Achivements of candidate",
+    instructions=achievements_instructions,
+    model=gemini_model
+)
+
+
+
+tool1 = skills_agent.as_tool(
+    tool_name="skills_extractor",
+    tool_description="Extracts and summarizes candidate skills from the resume, including technical, soft, and domain-specific skills."
+)
+
+tool2 = programming_language_agent.as_tool(
+    tool_name="programming_languages_extractor",
+    tool_description="Identifies programming languages mentioned in the candidate's resume and highlights their proficiency levels if available."
+)
+
+tool3 = experience_agent.as_tool(
+    tool_name="experience_extractor",
+    tool_description="Summarizes the candidate's work experience, including job roles, companies, durations, and responsibilities."
+)
+
+tool4 = education_agent.as_tool(
+    tool_name="education_extractor",
+    tool_description="Extracts the candidate's educational background, including degrees, institutions, years of study, and certifications."
+)
+
+tool5 = projects_agent.as_tool(
+    tool_name="projects_extractor",
+    tool_description="Summarizes projects the candidate has worked on, highlighting problem statements, technologies used, and outcomes."
+)
+
+tool6 = achievements_agent.as_tool(
+    tool_name="achievements_extractor",
+    tool_description="Identifies any awards, honors, recognitions, or other achievements mentioned in the candidate's resume."
+)
+tool7 = personal_info_agent.as_tool(
+    tool_name="personal_info_extractor",
+    tool_description="Extracts personal information from the candidate's resume, including name, contact details, location, and LinkedIn/GitHub profiles if available."
+)
+
+
+
+@function_tool
+def extract_candidate_information(resume_text: str):
+    """
+    Extracts all essential candidate information from a resume in a structured and concise format.
+
+    The extraction should strictly focus on details relevant for interviewers and hiring managers.
+    Provide clear, bullet-point or structured outputs.
+
+    Extract the following sections:
+
+    1. Personal Information
+       - Full Name
+       - Email
+       - Phone Number
+       - Location (City, State, Country)
+       - LinkedIn/GitHub/Portfolio links
+
+    2. Professional Summary
+       - 3–5 lines concise summary of the candidate’s profile
+
+    3. Skills
+       - Technical Skills (Tools, Frameworks, Libraries, etc.)
+       - Soft Skills (Communication, Leadership, Teamwork, etc.)
+
+    4. Programming Languages
+       - List all programming languages explicitly mentioned
+
+    5. Work Experience
+       - Company Name, Job Title, Duration
+       - Key Responsibilities (2–3 points)
+       - Achievements/Impact (quantified wherever possible)
+
+    6. Education
+       - Degree, Institution, Duration
+       - Key Highlights (e.g., GPA, Coursework, Honors)
+
+    7. Projects
+       - Project Title
+       - Description (2–3 lines)
+       - Tools/Technologies used
+       - Outcomes/Impact
+
+    8. Achievements & Certifications
+       - Awards, Recognitions, Scholarships
+       - Certifications (with provider and year)
+
+    9. Extracurricular & Volunteering (if available)
+       - Activities, Roles, Contributions
+
+    Rules:
+    - Keep each section structured and easy to read
+    - Avoid unnecessary details (only relevant for professional evaluation)
+    - If information is missing, return "Not Mentioned"
+    """
+
+    
+    return {
+        "personal_info": {...},
+        "skills": [...],
+        "programming_languages": [...],
+        "experience": [...],
+        "education": [...],
+        "projects": [...],
+        "achievements": [...]
+    }
+
+
+
+tools = [file_of_candidate,tool1,tool2,tool3,tool4,tool5,tool6,tool7,extract_candidate_information]
+
+
+
+
+instructions = """
+You are the Resume Master Agent. Your role is to coordinate the specialized resume_agent tools and deliver recruiter-friendly answers.
+
+How you must work:
+
+1. **Text Extraction**  
+   - Use the `file_of_candidate` tool to extract the raw resume text if not already available.
+
+2. **Tool Delegation**  
+   - Do not extract information yourself.  
+   - Always call the correct specialized agent/tool depending on the recruiter’s question:
+     • Personal info → personal_info_agent  
+     • Skills → skills_agent  
+     • Programming languages → programming_languages_agent  
+     • Experience → experience_agent  
+     • Education → education_agent  
+     • Projects → projects_agent  
+     • Achievements → achievements_agent  
+   - If recruiter asks for **all details** or explicitly for **JSON**, call all relevant agents and combine results.
+
+3. **Answer Style**  
+   - **Default behavior:** Give a clear, concise, recruiter-friendly answer in plain text.  
+     Example:  
+     Recruiter: *“What are the skills of Ibrahim?”*  
+     Response: *“Ibrahim’s skills include Python, FastAPI, PyQt5, AI-powered applications, and Automation tools. Soft skills include problem-solving, creativity, and user-focused design.”*  
+   - **Only if explicitly asked for ‘all information’ or ‘JSON’**, return the complete structured JSON object:
+     {
+       "personal_info": {...},
+       "skills": {...},
+       "programming_languages": [...],
+       "experience": [...],
+       "education": [...],
+       "projects": [...],
+       "achievements": [...]
+     }
+
+4. **Validation & Completeness**  
+   - If one tool’s output is incomplete or unclear, re-query or combine results from other tools.  
+   - Never fabricate data. If something is missing, state it’s unavailable or leave it null in JSON.
+
+**Critical Rules:**  
+- Default = recruiter-friendly plain text answers.  
+- JSON = only when recruiter explicitly requests all info or JSON.  
+- Always rely on the resume_agent tools’ outputs and respect their formatting.  
+"""
+
+resume_master_agent = Agent(
+    name = "Resume master agent",
+    instructions=instructions,
+    tools=tools,
+    model=gemini_model
+)
+
+
+async def resume_chat(message,history):
+    global CURRENT_RESUME_TEXT,CURRENT_DOC_ID
+    if not CURRENT_RESUME_TEXT:
+        if message.lower().startswith("doc_id:"):
+            doc_id = message.split("doc_id:")[1].strip()
+            file_path = db.get_file_path(doc_id)
+            if not file_path:
+                return "⚠️ Document not found in DB. Please upload again or provide a valid doc_id."
+
+            CURRENT_RESUME_TEXT = extract_candidate_data(file_path)
+            CURRENT_DOC_ID = doc_id
+            return f"✅ Loaded resume from DB (doc_id={doc_id}). Now you can ask questions."
+        else:
+            return "⚠️ No resume uploaded. Upload a file or type `doc_id:<your_id>` to load one."
+    
+
+
+    
+    merged_input = (
+        f"Here is the candidate resume:\n{CURRENT_RESUME_TEXT}\n\n"
+        f"Recruiter question: {message}"
+    )
+
+    print("DEBUG merged input:", repr(merged_input))
+
+    result = await Runner.run(resume_master_agent, merged_input)
+    return result.final_output
+    
+
+def handle_doc_id_input(doc_id):
+    global CURRENT_RESUME_TEXT, CURRENT_DOC_ID
+    file_path = db.get_file_path(doc_id)
+
+    if not file_path:
+        return f"⚠️ No document found for doc_id={doc_id}"
+
+    CURRENT_RESUME_TEXT = extract_candidate_data(file_path)
+    CURRENT_DOC_ID = doc_id
+
+    return f"✅ Loaded resume from DB (doc_id={doc_id})"
+
+
+
+with gr.Blocks() as demo:
+    gr.Markdown("## 📂 Resume Screening Assistant")
+
+    with gr.Row():
+        resume_file = gr.File(label="Upload Resume", file_types=[".pdf", ".docx", ".txt"])
+        upload_btn = gr.Button("Upload")
+
+    upload_status = gr.Textbox(label="Upload Status")
+
+    with gr.Row():
+        doc_id_input = gr.Textbox(label="Enter Existing Doc ID")
+        doc_id_btn = gr.Button("Load Document")
+
+    chat = gr.ChatInterface(
+        fn=resume_chat,
+        type="messages",
+        title="Chat about Candidate",
+        description="Upload a resume or enter an existing doc_id to start asking questions."
+    )
+
+    upload_btn.click(
+        fn=handle_resume_upload,
+        inputs=resume_file,
+        outputs=upload_status
+    )
+
+    doc_id_btn.click(
+        fn=handle_doc_id_input,
+        inputs=doc_id_input,
+        outputs=upload_status
+    )
+
+if __name__ == "__main__":
+    demo.launch()
+
+
+
+
