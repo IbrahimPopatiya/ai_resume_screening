@@ -1,0 +1,33 @@
+ADITYA NAIR
+DATA ENGINEERING INTERN | SPARK & SNOWFLAKE PIPELINE BUILDER
+
+PROFILE
+Aspiring data engineer focused on building real-time activity pipelines, enterprise warehouse sync, and distributed data processing systems.
+
+SKILLS
+Data Engineering:
+• Apache Spark
+• Snowflake Warehouse
+• ETL Pipeline Design
+Other Skills:
+• Distributed Query Optimization
+• Data Normalization
+• Cloud Sync
+
+WORK EXPERIENCE
+Real-time Sales Data Pipeline
+• Built distributed sales data flow using Apache Spark streaming → Snowflake.
+• Impact: Reduced pipeline complexity and improved processing speed.
+
+Cloud DW Sync Engine
+• Designed system to push cleansed staged data into cloud warehouses incrementally.
+
+EDUCATION
+Diploma — Computer Science
+Government Polytechnic, Mumbai (2023)
+
+CONTACT
+Phone: 9333330123
+Email: aditya.nair@data.dev
+GitHub: turn0file0
+LinkedIn: aditya-nair-profile

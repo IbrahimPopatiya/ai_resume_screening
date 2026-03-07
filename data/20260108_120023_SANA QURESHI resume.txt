@@ -1,0 +1,35 @@
+SANA QURESHI
+AI BACKEND INTERN | FASTAPI & ML SERVICE BUILDER
+
+PROFILE
+Motivated AI backend developer experienced in building machine-learning microservices, warehouse-connected APIs, and customer behavior prediction tools.
+
+SKILLS
+Backend:
+• Python
+• FastAPI
+• SQLite/PostgreSQL
+AI/ML:
+• Scikit-learn
+• Model Deployment
+Other Skills:
+• ML Service Design
+• Business Rule Automation
+
+WORK EXPERIENCE
+Customer Churn Prediction Service
+• Built ML prediction API using Python + FastAPI + sklearn.
+• Impact: Helped business identify at-risk users early.
+
+CRM Auto-Tagger API
+• Developed service that classifies users based on activity behavior into CRM labels.
+
+EDUCATION
+BTech Artificial Intelligence & Data Science
+IIT University, Jammu (2025)
+
+CONTACT
+Phone: 8555551234
+Email: sana.qureshi@ai.dev
+GitHub: turn0file0
+LinkedIn: sana-qureshi-profile

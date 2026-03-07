@@ -1,0 +1,35 @@
+KABIR SHAIKH
+BACKEND INTERN | DATA-DRIVEN WEB INTELLIGENCE BUILDER
+
+PROFILE
+Backend enthusiast focused on web intelligence systems, customer insights, and scalable database architecture. Skilled in building APIs and relational warehouses that support business decisions.
+
+SKILLS
+Backend:
+• Node.js
+• PostgreSQL
+• Express.js
+• SQL Modeling
+Other Skills:
+• API Design
+• Data Integration
+• Performance Tuning
+
+WORK EXPERIENCE
+Customer Insight Intelligence Engine
+• Built behavioral analysis backend for customer activity intelligence.
+• Used Node + PostgreSQL.
+• Impact: Improved customer targeting and campaign accuracy.
+
+Order Automation API
+• Designed API to automate retail order tracking and status intelligence.
+
+EDUCATION
+BCA — Computer Applications
+Jamia University, Delhi (2024)
+
+CONTACT
+Phone: 7000001234
+Email: kabir.shaikh@backend.dev
+GitHub: turn0file0
+LinkedIn: kabir-shaikh-profile
