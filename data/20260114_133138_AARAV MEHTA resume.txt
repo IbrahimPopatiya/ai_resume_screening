@@ -1,0 +1,40 @@
+AARAV MEHTA
+FRONTEND DEVELOPER | REACT & TAILWIND SPECIALIST
+
+PROFILE
+Passionate frontend developer with hands-on experience building scalable UI systems, interactive dashboards, and user-focused web applications. Strong command over component-based design, responsive layouts, and performance optimization. Enjoys translating complex requirements into elegant UI experiences.
+
+SKILLS
+Frontend Development:
+• React.js
+• Tailwind CSS
+• JavaScript (ES6+)
+• HTML5, CSS3
+UI/UX:
+• Figma Wireframing
+• Component Design
+Other Skills:
+• UI Optimization
+• Design System Thinking
+• Client Communication
+
+WORK EXPERIENCE
+Retail AI UI Component Library
+• Built reusable UI component library for retail analytics dashboard.
+• Developed using React.js + Tailwind CSS for fast styling.
+• Impact: Reduced UI development time by 60% and improved design consistency.
+
+E-Commerce Store Frontend
+• Created responsive e-commerce UI for direct retail product display.
+• Integrated cart, product filters, and category navigation.
+• Improved user journey leading to better conversion rates.
+
+EDUCATION
+BTech Information Technology
+VIT University, Bhopal (2025)
+
+CONTACT
+Phone: 9876543210
+Email: aarav.mehta@frontend.dev
+GitHub: turn0file0
+LinkedIn: aarav-mehta-profile

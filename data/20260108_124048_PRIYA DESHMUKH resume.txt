@@ -1,0 +1,34 @@
+PRIYA DESHMUKH
+MOBILE AI INTERN | FLUTTER & TFLITE SPECIALIST
+
+PROFILE
+Mobile developer with AI edge, experienced in building offline intelligence, on-device ML, and business support applications.
+
+SKILLS
+Mobile:
+• Flutter
+• Dart
+AI/On-Device ML:
+• TensorFlow Lite
+• ML Model Compression
+Other Skills:
+• Notification System Design
+• Client Requirement Analysis
+
+WORK EXPERIENCE
+Offline AI Assistant App
+• Built on-device AI assistant using TensorFlow Lite + Flutter.
+• Impact: Enabled offline intelligence and faster response.
+
+Smart Notification System
+• Created intelligent alerts system for customer engagement via CRM triggers.
+
+EDUCATION
+MCA — Computer Applications
+MIT University, Aurangabad (2025)
+
+CONTACT
+Phone: 9988771122
+Email: priya.deshmukh@app.dev
+GitHub: turn0file0
+LinkedIn: priya-deshmukh-profile

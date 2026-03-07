@@ -1,0 +1,39 @@
+RIYA KULKARNI
+NEXT.JS FRONTEND INTERN | UI GROWTH BUILDER
+
+PROFILE
+Creative frontend developer skilled in modern frameworks, UI libraries, and performance-first web design. Experienced in building dashboards, learning platforms, and interactive user interfaces. Loves designing interfaces that support data clarity and business growth.
+
+SKILLS
+Frontend:
+• Next.js
+• ShadCN UI
+• TypeScript
+• Tailwind CSS
+Tools:
+• Vercel Deployment
+• UI Prototyping
+Other Skills:
+• UX Thinking
+• API Integration
+• Dashboard Design
+
+WORK EXPERIENCE
+Learning Progress Dashboard
+• Built learning analytics UI using Next.js + ShadCN + Tailwind.
+• Included charts, filters, progress widgets.
+• Impact: Helped students monitor learning trends effectively.
+
+Food Delivery Web UI
+• Created a food ordering interface with restaurant listing, menu browsing, cart, checkout.
+• Focused on UI speed and smooth navigation.
+
+EDUCATION
+BTech Computer Engineering
+DY Patil University, Pune (2025)
+
+CONTACT
+Phone: 9123456780
+Email: riya.kulkarni@ui.dev
+GitHub: turn0file0
+LinkedIn: riya-kulkarni-profile
