@@ -12,7 +12,6 @@ from docx import Document
 from openai import AsyncOpenAI
 import os
 from sendgrid.helpers.mail import Mail,Email,To,Content
-import google.generativeai as genai
 import asyncio
 from datetime import datetime
 import shutil
@@ -21,6 +20,9 @@ from databse import PostgresDB
 
 ## how are you
 load_dotenv(override=True)
+# Avoid tracing client authentication issues with invalid/expired OpenAI keys by unsetting it dynamically
+import os
+os.environ.pop("OPENAI_API_KEY", None)
 
 db = PostgresDB()
 db.create_table()
@@ -42,7 +44,8 @@ else:
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 
 gemini_client = AsyncOpenAI(base_url=GEMINI_BASE_URL, api_key=google_api_key)
-gemini_model = OpenAIChatCompletionsModel(model="gemini-2.0-flash", openai_client=gemini_client)
+# Using gemini-2.5-flash since gemini-2.0-flash compatibility endpoint is restricted for new keys/projects
+gemini_model = OpenAIChatCompletionsModel(model="gemini-2.5-flash", openai_client=gemini_client)
 
 
 
@@ -795,113 +798,321 @@ def resume_chat_sync(message, history):
     return asyncio.run(resume_chat(message, history))
 
 
-def add_files(new_files, current_files):
-    if not current_files:
-        current_files = []
-    if new_files:
-        current_files.extend(new_files)
-    file_names = [f.name for f in current_files]
-    return current_files, "\n".join(file_names)
+# ---------------- Gradio Helpers & UI ----------------
 
-def process_and_reset(files):
-    status = multiple_resume_upload(files)
-    return status, [], ""
+def load_resumes_to_ui(search_query="", sort_by="Newest First"):
+    try:
+        rows = db.get_resumes(search_query, sort_by)
+        return [[row[0], row[1]] for row in rows]
+    except Exception as e:
+        print(f"Error fetching resumes: {e}")
+        return []
 
-def clear_list():
-    return [], ""
+def get_initial_resumes():
+    return load_resumes_to_ui("", "Newest First")
+
+def preview_selected(evt: gr.SelectData, df, current_doc_ids):
+    row_idx = evt.index[0]
+    try:
+        import pandas as pd
+        if isinstance(df, pd.DataFrame):
+            doc_id = df.iloc[row_idx].iloc[0]
+        else:
+            doc_id = df[row_idx][0]
+            
+        file_path = db.get_file_path(doc_id)
+        if file_path and os.path.exists(file_path):
+            text = extract_candidate_data(file_path)
+            # Also load to memory ALL_RESUME so they can chat about it
+            global ALL_RESUME
+            ALL_RESUME[doc_id] = text
+            
+            # Append doc_id to current_doc_ids if not already present
+            if current_doc_ids:
+                existing_ids = [d.strip() for d in current_doc_ids.split(",") if d.strip()]
+                if doc_id not in existing_ids:
+                    existing_ids.append(doc_id)
+                new_doc_ids = ", ".join(existing_ids)
+            else:
+                new_doc_ids = doc_id
+                
+            return text, doc_id, new_doc_ids
+        else:
+            if current_doc_ids:
+                existing_ids = [d.strip() for d in current_doc_ids.split(",") if d.strip()]
+                if doc_id not in existing_ids:
+                    existing_ids.append(doc_id)
+                new_doc_ids = ", ".join(existing_ids)
+            else:
+                new_doc_ids = doc_id
+            return f"⚠️ File not found at: {file_path}", doc_id, new_doc_ids
+    except Exception as e:
+        return f"⚠️ Error loading preview: {str(e)}", "", current_doc_ids or ""
 
 def call_recruiter_tool(requirement_text: str):
     result = requirement_text.strip()
-    return result,result
+    return result, result
 
-# ---------------- Gradio UI ----------------
-with gr.Blocks() as demo:
-    gr.Markdown("## 📂 Resume Screening Assistant")
+# Custom CSS for modern look
+custom_css = """
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
 
-    # State to hold file list
-    file_state = gr.State([])
+body, .gradio-container {
+    font-family: 'Outfit', sans-serif !important;
+}
+
+.header-container {
+    background: linear-gradient(135deg, #f5f7fa 0%, #e2ebf0 100%);
+    padding: 24px;
+    border-radius: 12px;
+    margin-bottom: 24px;
+    border: 1px solid #e1e8ed;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+}
+
+.primary-btn {
+    background: linear-gradient(90deg, #4f46e5 0%, #7c3aed 100%) !important;
+    color: white !important;
+    border: none !important;
+    font-weight: 600 !important;
+    border-radius: 8px !important;
+    transition: all 0.3s ease !important;
+    box-shadow: 0 4px 6px rgba(79, 70, 229, 0.2) !important;
+}
+
+.primary-btn:hover {
+    transform: translateY(-2px) !important;
+    box-shadow: 0 6px 12px rgba(79, 70, 229, 0.3) !important;
+}
+
+.tab-nav button {
+    font-weight: 600 !important;
+    font-size: 15px !important;
+}
+"""
+
+# Custom Javascript for table cell click-to-copy, hover highlighting, and Toast notifications
+custom_js = """
+function() {
+    // Check click events globally on table cells
+    document.addEventListener('click', function(e) {
+        const td = e.target.closest('td');
+        if (!td) return;
+        const text = (td.innerText || td.textContent || "").trim();
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (uuidRegex.test(text)) {
+            navigator.clipboard.writeText(text).then(function() {
+                showToast("✓ Doc ID Copied: " + text);
+            }).catch(err => {
+                console.error("Could not copy Doc ID: ", err);
+            });
+        }
+    });
+
+    // Add pointer cursor and highlight on hover for cells containing UUIDs
+    document.addEventListener('mouseover', function(e) {
+        const td = e.target.closest('td');
+        if (!td) return;
+        const text = (td.innerText || td.textContent || "").trim();
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (uuidRegex.test(text)) {
+            td.style.cursor = 'pointer';
+            td.title = 'Click to copy Doc ID';
+            td.style.backgroundColor = 'rgba(79, 70, 229, 0.1)';
+            td.style.transition = 'background-color 0.2s';
+        }
+    });
+
+    document.addEventListener('mouseout', function(e) {
+        const td = e.target.closest('td');
+        if (!td) return;
+        const text = (td.innerText || td.textContent || "").trim();
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (uuidRegex.test(text)) {
+            td.style.backgroundColor = '';
+        }
+    });
+
+    function showToast(message) {
+        let toast = document.getElementById('gradio-copy-toast');
+        if (!toast) {
+            toast = document.createElement('div');
+            toast.id = 'gradio-copy-toast';
+            toast.style.position = 'fixed';
+            toast.style.bottom = '20px';
+            toast.style.right = '20px';
+            toast.style.backgroundColor = '#4f46e5';
+            toast.style.color = '#fff';
+            toast.style.padding = '12px 24px';
+            toast.style.borderRadius = '8px';
+            toast.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
+            toast.style.zIndex = '9999';
+            toast.style.fontSize = '14px';
+            toast.style.fontFamily = "'Outfit', sans-serif";
+            toast.style.transition = 'opacity 0.3s ease';
+            document.body.appendChild(toast);
+        }
+        toast.innerText = message;
+        toast.style.opacity = '1';
+        setTimeout(function() {
+            toast.style.opacity = '0';
+        }, 2000);
+    }
+}
+"""
+
+with gr.Blocks(css=custom_css, js=custom_js, theme=gr.themes.Soft(primary_hue="indigo", secondary_hue="violet", neutral_hue="slate")) as demo:
+    
+    # Custom Header matching screenshots
+    with gr.Column(elem_classes=["header-container"]):
+        gr.Markdown(
+            """
+            # 📄 Resume Extraction System
+            ### Upload resumes → store them → retrieve later using doc_id.
+            **✓ Supports PDF, DOCX, TXT**
+            """
+        )
+
+    # State for recruiter requirement
     recruiter_req_state = gr.State("")
 
-    # File selection row
-    with gr.Row():
-        file_input = gr.File(
-            label="Upload / Add Resume(s)",
-            file_count="multiple",
-            file_types=[".pdf", ".docx", ".txt"]
-        )
-        add_btn = gr.Button("Add to List")
-        clear_btn = gr.Button("Clear List")
+    with gr.Tabs() as tabs:
+        # Tab 1: Upload Resumes
+        with gr.Tab("Upload Resumes"):
+            with gr.Column():
+                file_input = gr.File(
+                    label="Upload / Add Resume(s)",
+                    file_count="multiple",
+                    file_types=[".pdf", ".docx", ".txt"]
+                )
+                upload_btn = gr.Button("Upload ➔ Extract ➔ Save", elem_classes=["primary-btn"])
+                upload_status = gr.Textbox(label="Upload Status", lines=6, interactive=False)
 
-    ##recruiter section
-    with gr.Row():
-        recruiter_box = gr.Textbox(
-            label="Recruiter Requirement",
-            placeholder="E.g., Looking for Python developer with 3+ years exp in Django & SQL",
-            lines=3
-        )
-        recruiter_btn = gr.Button("Process Requirement")
-        recruiter_status = gr.Textbox(label="Requirement Status", lines=4)
+        # Tab 2: Stored Resumes
+        with gr.Tab("Stored Resumes"):
+            with gr.Column():
+                refresh_btn = gr.Button("🔄 Refresh Resume List")
+                
+                with gr.Row():
+                    search_input = gr.Textbox(
+                        label="Search by filename or doc_id",
+                        placeholder="e.g. python developer",
+                        scale=4
+                    )
+                    search_btn = gr.Button("Search", scale=1)
+                
+                with gr.Row():
+                    sort_dropdown = gr.Dropdown(
+                        label="Sort by upload time",
+                        choices=["Newest First", "Oldest First"],
+                        value="Newest First",
+                        scale=4
+                    )
+                    sort_btn = gr.Button("Sort", scale=1)
 
+                with gr.Row():
+                    with gr.Column(scale=1):
+                        gr.Markdown("### Saved Resume Records")
+                        resumes_df = gr.Dataframe(
+                            headers=["Doc ID", "Filename"],
+                            datatype=["str", "str"],
+                            value=get_initial_resumes,
+                            interactive=False,
+                            wrap=True
+                        )
+                    with gr.Column(scale=1):
+                        gr.Markdown("### Resume Preview")
+                        selected_doc_id = gr.Textbox(
+                            label="Selected Doc ID",
+                            placeholder="Select a resume to see and copy its Doc ID...",
+                            interactive=False,
+                            show_copy_button=True
+                        )
+                        preview_box = gr.Textbox(
+                            label="",
+                            placeholder="Select a resume from the list to preview...",
+                            interactive=False,
+                            lines=18
+                        )
 
+        # Tab 3: Load by Doc ID
+        with gr.Tab("Load by Doc ID"):
+            with gr.Column():
+                doc_id_input = gr.Textbox(
+                    label="Enter doc_id(s), comma separated",
+                    placeholder="Enter one or more UUIDs"
+                )
+                load_btn = gr.Button("Load Resumes", elem_classes=["primary-btn"])
+                load_status = gr.Textbox(label="Status", lines=6, interactive=False)
 
-    # Show selected files
-    output_text = gr.Textbox(label="Files in List", lines=5)
+        # Tab 4: Chat & Screening
+        with gr.Tab("Chat & Screening"):
+            with gr.Row():
+                with gr.Column(scale=1):
+                    recruiter_box = gr.Textbox(
+                        label="Recruiter Requirement",
+                        placeholder="E.g., Looking for Python developer with 3+ years exp in Django & SQL",
+                        lines=5
+                    )
+                    recruiter_btn = gr.Button("Process Requirement", elem_classes=["primary-btn"])
+                    recruiter_status = gr.Textbox(label="Requirement Status", lines=8, interactive=False)
+                
+                with gr.Column(scale=2):
+                    chat = gr.ChatInterface(
+                        fn=resume_chat,
+                        type="messages",
+                        title="Chat about Candidate(s)",
+                        description="Ask questions or request candidates ranking/scoring based on requirements.",
+                        additional_inputs=[recruiter_req_state]
+                    )
 
-    # Upload section
-    upload_btn = gr.Button("Upload")
-    upload_status = gr.Textbox(label="Upload Status", lines=5)
+    # ----------- Wiring -----------
 
-    # Doc ID input section
-    with gr.Row():
-        doc_id_input = gr.Textbox(label="Enter Existing Doc ID(s), comma-separated")
-        doc_id_btn = gr.Button("Load Document(s)")
-        doc_id_status = gr.Textbox(label="Status", lines=2)
-
-    # Chat interface
-    chat = gr.ChatInterface(
-        fn=resume_chat,
-        type="messages",
-        title="Chat about Candidate(s)",
-        description="Upload resumes (single/multiple) or enter doc_id(s) and add recruiter requirement to start asking questions.",
-        additional_inputs=[recruiter_req_state]
-    )
-
-    # ----------- Button wiring -----------
-
-    # Add files to list
-    add_btn.click(
-        fn=add_files,
-        inputs=[file_input, file_state],
-        outputs=[file_state, output_text]
-    )
-
-    # Upload & reset
+    # Tab 1: Upload Resumes
     upload_btn.click(
-        fn=process_and_reset,
-        inputs=file_state,
-        outputs=[upload_status, file_state, output_text]
+        fn=multiple_resume_upload,
+        inputs=file_input,
+        outputs=upload_status
     )
 
-    # Clear manually
-    clear_btn.click(
-        fn=clear_list,
-        outputs=[file_state, output_text]
+    # Tab 2: Stored Resumes
+    refresh_btn.click(
+        fn=lambda: ("", "Newest First", load_resumes_to_ui("", "Newest First")),
+        inputs=[],
+        outputs=[search_input, sort_dropdown, resumes_df]
     )
 
-    # Handle doc ID input
-    doc_id_btn.click(
+    search_btn.click(
+        fn=load_resumes_to_ui,
+        inputs=[search_input, sort_dropdown],
+        outputs=resumes_df
+    )
+
+    sort_btn.click(
+        fn=load_resumes_to_ui,
+        inputs=[search_input, sort_dropdown],
+        outputs=resumes_df
+    )
+
+    resumes_df.select(
+        fn=preview_selected,
+        inputs=[resumes_df, doc_id_input],
+        outputs=[preview_box, selected_doc_id, doc_id_input]
+    )
+
+    # Tab 3: Load by Doc ID
+    load_btn.click(
         fn=handle_doc_id_input,
         inputs=doc_id_input,
-        outputs=doc_id_status
+        outputs=load_status
     )
 
+    # Tab 4: Chat & Screening
     recruiter_btn.click(
-    fn=call_recruiter_tool,
-    inputs=[recruiter_box],
-    outputs=[recruiter_req_state,recruiter_status]
-)
+        fn=call_recruiter_tool,
+        inputs=[recruiter_box],
+        outputs=[recruiter_req_state, recruiter_status]
+    )
 
-
-# ---------------- Launch ----------------
 if __name__ == "__main__":
     demo.launch()

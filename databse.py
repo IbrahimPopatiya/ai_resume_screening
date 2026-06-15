@@ -52,4 +52,23 @@ class PostgresDB():
         self.conn.commit()
         cur.close()
 
+    def get_resumes(self, search_query="", sort_by="Newest First"):
+        cur = self.connect()
+        query = "SELECT doc_id, filename FROM resume_metadata"
+        params = []
+        if search_query:
+            query += " WHERE filename ILIKE %s OR doc_id = %s"
+            params.extend([f"%{search_query}%", search_query])
+        
+        if sort_by == "Newest First":
+            query += " ORDER BY uploaded_at DESC"
+        else:
+            query += " ORDER BY uploaded_at ASC"
+            
+        cur.execute(query, params)
+        rows = cur.fetchall()
+        cur.close()
+        return rows
+
+
 
