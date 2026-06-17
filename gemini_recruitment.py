@@ -20,9 +20,6 @@ from databse import PostgresDB
 
 ## how are you
 load_dotenv(override=True)
-# Avoid tracing client authentication issues with invalid/expired OpenAI keys by unsetting it dynamically
-import os
-os.environ.pop("OPENAI_API_KEY", None)
 
 db = PostgresDB()
 db.create_table()
@@ -35,17 +32,39 @@ CURRENT_DOC_ID = None
 ALL_RESUME = {}
 
 google_api_key = os.getenv('GOOGLE_API_KEY')
+openai_api_key = os.getenv('OPENAI_API_KEY')
 
-if google_api_key:
-    print(f"Google API Key exists and begins {google_api_key[:2]}")
+def is_google_api_key_valid(api_key: str) -> bool:
+    if not api_key or not api_key.startswith("AIzaSy"):
+        return False
+    import requests
+    try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+        response = requests.post(url, json={"contents": [{"parts": [{"text": "ping"}]}]}, timeout=3)
+        return response.status_code == 200
+    except Exception:
+        return False
+
+if is_google_api_key_valid(google_api_key):
+    print("Valid Google API Key found. Using Gemini models.")
+    # Avoid tracing client authentication issues with invalid/expired OpenAI keys by unsetting it dynamically
+    os.environ.pop("OPENAI_API_KEY", None)
+    
+    GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+    gemini_client = AsyncOpenAI(base_url=GEMINI_BASE_URL, api_key=google_api_key)
+    gemini_model = OpenAIChatCompletionsModel(model="gemini-2.5-flash", openai_client=gemini_client)
 else:
-    print("Google API Key not set (and this is optional)")
-
-GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
-
-gemini_client = AsyncOpenAI(base_url=GEMINI_BASE_URL, api_key=google_api_key)
-# Using gemini-2.5-flash since gemini-2.0-flash compatibility endpoint is restricted for new keys/projects
-gemini_model = OpenAIChatCompletionsModel(model="gemini-2.5-flash", openai_client=gemini_client)
+    print("Google API Key is invalid or not set. Checking for OpenAI API Key...")
+    if openai_api_key:
+        print("Valid OpenAI API Key found. Falling back to OpenAI (gpt-4o-mini).")
+        openai_client = AsyncOpenAI(api_key=openai_api_key)
+        gemini_model = OpenAIChatCompletionsModel(model="gpt-4o-mini", openai_client=openai_client)
+    else:
+        print("Warning: Neither valid Google API Key nor OpenAI API Key was found.")
+        # Setup gemini_model with the provided key anyway to avoid runtime errors on module load
+        GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+        gemini_client = AsyncOpenAI(base_url=GEMINI_BASE_URL, api_key=google_api_key)
+        gemini_model = OpenAIChatCompletionsModel(model="gemini-2.5-flash", openai_client=gemini_client)
 
 
 
@@ -961,7 +980,7 @@ function() {
 }
 """
 
-with gr.Blocks(css=custom_css, js=custom_js, theme=gr.themes.Soft(primary_hue="indigo", secondary_hue="violet", neutral_hue="slate")) as demo:
+with gr.Blocks() as demo:
     
     # Custom Header matching screenshots
     with gr.Column(elem_classes=["header-container"]):
@@ -1025,8 +1044,7 @@ with gr.Blocks(css=custom_css, js=custom_js, theme=gr.themes.Soft(primary_hue="i
                         selected_doc_id = gr.Textbox(
                             label="Selected Doc ID",
                             placeholder="Select a resume to see and copy its Doc ID...",
-                            interactive=False,
-                            show_copy_button=True
+                            interactive=False
                         )
                         preview_box = gr.Textbox(
                             label="",
@@ -1060,7 +1078,6 @@ with gr.Blocks(css=custom_css, js=custom_js, theme=gr.themes.Soft(primary_hue="i
                 with gr.Column(scale=2):
                     chat = gr.ChatInterface(
                         fn=resume_chat,
-                        type="messages",
                         title="Chat about Candidate(s)",
                         description="Ask questions or request candidates ranking/scoring based on requirements.",
                         additional_inputs=[recruiter_req_state]
@@ -1115,4 +1132,4 @@ with gr.Blocks(css=custom_css, js=custom_js, theme=gr.themes.Soft(primary_hue="i
     )
 
 if __name__ == "__main__":
-    demo.launch()
+    demo.launch(css=custom_css, js=custom_js, theme=gr.themes.Soft(primary_hue="indigo", secondary_hue="violet", neutral_hue="slate"))
